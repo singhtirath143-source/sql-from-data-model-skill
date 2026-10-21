@@ -1,0 +1,18 @@
+.DS_Store
+
+# Local setup. Never commit passwords or connection strings.
+*.local.json
+.env
+setup.json
+databases.json
+
+# A user's data model and notes stay out of git.
+# This does not ignore notes.template.md or databases.example.json.
+*data-model*.md
+notes.md
+!.cursor/skills/**/*data-model*.md
+!.cursor/skills/**/notes.template.md
+
+# Python bytecode from running the tests.
+__pycache__/
+*.pyc

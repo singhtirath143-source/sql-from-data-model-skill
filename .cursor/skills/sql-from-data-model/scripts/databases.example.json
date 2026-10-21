@@ -1,0 +1,12 @@
+{
+  "environments": [
+    { "name": "Dev", "databases": [
+      { "key": "DEV_APP", "label": "App", "server": "sql-dev.example.com", "port": 1433, "database": "app_db" },
+      { "key": "DEV_REPORTING", "label": "Reporting", "server": "sql-reporting-dev.example.com", "port": 1433, "database": "reporting_db" }
+    ]},
+    { "name": "Staging", "databases": [
+      { "key": "STG_APP", "label": "App", "server": "sql-staging.example.com", "port": 1433, "database": "app_staging_db" },
+      { "key": "STG_REPORTING", "label": "Reporting", "server": "sql-reporting-staging.example.com", "port": 1433, "database": "reporting_staging_db" }
+    ]}
+  ]
+}
