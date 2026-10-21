@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform Option A tool for sql-from-data-model.
+"""Cross-platform Option A tool for sql-from-data-model-skill.
 
 Commands: paths, check, init-databases, setup, run.
 Does not print passwords. Call setup or run only when a person is at the computer.
@@ -25,13 +25,13 @@ DOTTED_VERSION_RE = re.compile(r"(\d+)\.(\d+)(?:\.(\d+))?")
 BARE_VERSION_RE = re.compile(r"\b(\d+)\b")
 FORBIDDEN = re.compile(
     r"\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|ALTER|DROP|CREATE|EXEC|EXECUTE|GRANT|REVOKE|DENY|INTO|DECLARE"
-    r"|OPENROWSET|OPENQUERY|OPENDATASOURCE|USE|WAITFOR|DBCC|BACKUP|RESTORE|BULK|KILL|SHUTDOWN)\b",
+    r"|OPENROWSET|OPENQUERY|OPENDATASOURCE|USE|WAITFOR|DBCC|BACKUP|RESTORE|BULK|KILL|SHUTDOWN"
+    r"|NEXT\s+VALUE\s+FOR)\b",
     re.IGNORECASE,
 )
-NEXT_VALUE_RE = re.compile(r"\bNEXT\s+VALUE\s+FOR\b", re.IGNORECASE)
-# A [name] or "name" is masked to a marker, not a blank. A statement that is only a name
-# runs as a stored procedure call in SQL Server, so it must not look like an empty statement.
-NAME_MARK = " [name] "
+# A bracketed or double-quoted name becomes this marker, so a lone name still has a first word.
+# SQL Server runs a lone name at the start of a batch as a stored procedure call.
+NAME_MARKER = " [name] "
 ALLOWED_SET = {
     "set nocount on",
     "set nocount off",
@@ -44,14 +44,13 @@ CONTINUATIONS = {
 }
 PIPE_SEPARATOR_RE = re.compile(r"^\|[-|\s]+\|$")
 PIPE_VALUE_NOTE = 'NOTE a value contains "|", so this table may display wrong'
+APOSTROPHE_HINT = "If a value contains an apostrophe, write it twice, for example N'O''Brien'."
 DECLARE_MESSAGE = (
     "the query uses DECLARE. dbvr runs each statement separately, "
-    "so variables are lost. Put the value directly in the query instead."
+    "so variables are lost. Put the value directly in the query instead. "
+    + APOSTROPHE_HINT
 )
-UNCLOSED_MESSAGE = (
-    "the query has an unclosed quote, bracket, or comment. "
-    "If a value contains an apostrophe, write it twice, for example N'O''Brien'."
-)
+UNCLOSED_MESSAGE = "the query has an unclosed quote, bracket, or comment. " + APOSTROPHE_HINT
 ROLE_QUERY = (
     "SELECT DB_NAME() AS database_name, "
     "IS_ROLEMEMBER('db_datareader') AS reader_role, "
@@ -298,7 +297,6 @@ def model_path(setup, paths):
 
 
 def queries_path(setup, paths):
-    """The saved-queries file sits next to the data model: <model name>.saved-queries.md."""
     model = model_path(setup, paths)
     return model.with_name(f"{model.stem}.saved-queries.md")
 
@@ -595,14 +593,14 @@ def prepare_sql(sql):
             end = _scan_bracket(text, index)
             if end is None:
                 return None
-            out.append(NAME_MARK)
+            out.append(NAME_MARKER)
             index = end
             continue
         if text[index] == '"':
             end = _scan_quoted(text, index, '"')
             if end is None:
                 return None
-            out.append(NAME_MARK)
+            out.append(NAME_MARKER)
             index = end
             continue
         if text.startswith("--", index):
@@ -674,11 +672,7 @@ def forbidden_keyword(sql):
     if prepared is None:
         return None
     match = FORBIDDEN.search(prepared)
-    if match:
-        return match.group(1).upper()
-    if NEXT_VALUE_RE.search(prepared):
-        return "NEXT VALUE FOR"
-    return None
+    return " ".join(match.group(1).upper().split()) if match else None
 
 
 def refuse_reason(sql):
@@ -781,8 +775,28 @@ def dbvr_command(dbvr, workspace, host, port, database, user, password, query=No
     return cmd
 
 
+STDOUT_UTF8_OPTION = "-Dstdout.encoding=UTF-8"
+
+
+def dbvr_env(platform=None, environ=None):
+    """Return a copy of the environment for dbvr. Never changes the one passed in.
+
+    On Windows, dbvr's bundled Java writes stdout in the Windows code page, so an
+    emoji prints as "?". -Dstdout.encoding=UTF-8 fixed it (dbvr 26.2.3);
+    -Dfile.encoding=UTF-8 did not.
+    """
+    platform = platform or sys.platform
+    env = dict(os.environ if environ is None else environ)
+    if platform != "win32":
+        return env
+    current = env.get("JAVA_TOOL_OPTIONS", "")
+    if STDOUT_UTF8_OPTION not in current.split():
+        env["JAVA_TOOL_OPTIONS"] = f"{current} {STDOUT_UTF8_OPTION}" if current.strip() else STDOUT_UTF8_OPTION
+    return env
+
+
 def run_dbvr(cmd, timeout):
-    proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    proc = subprocess.run(cmd, capture_output=True, timeout=timeout, env=dbvr_env())
     proc.stdout = decode_output(proc.stdout)
     proc.stderr = decode_output(proc.stderr)
     return proc
@@ -837,10 +851,9 @@ def pipe_value_note(output):
 
 
 def role_result(output, database_name):
-    """Return 'read-only', 'can-write', or 'missing' from a pipe table. No database call.
+    """Return 'read-only', 'can change data', or 'missing' from a pipe table. No database call.
 
-    Any login may be used. Writer or owner membership only decides what setup reports;
-    the SQL gate is what keeps queries read-only.
+    Only reports. Any login that signs in is accepted; the SQL filter keeps queries read-only.
     """
     rows = [
         line for line in (output or "").splitlines()
@@ -852,12 +865,11 @@ def role_result(output, database_name):
     if len(cells) < 4:
         return "missing"
     if "1" in (cells[2], cells[3]):
-        return "can-write"
+        return "can change data"
     return "read-only"
 
 
-def sign_in_check(dbvr, workspace, db, user, password):
-    """Sign in with one SELECT. Fails only when sign-in fails; a login that can write passes."""
+def check_login_roles(dbvr, workspace, db, user, password):
     redact = make_redact([user, password])
     cmd = dbvr_command(
         dbvr, workspace, db["server"], db["port"], db["database"], user, password, ROLE_QUERY,
@@ -872,11 +884,9 @@ def sign_in_check(dbvr, workspace, db, user, password):
     if proc.returncode != 0:
         return False, map_dbvr_error(blob, db["label"], db["env"])
     result = role_result(out, db["database"])
-    if result == "read-only":
-        return True, "read-only"
-    if result == "can-write":
-        return True, "can change data. Only SELECT and WITH will run."
-    return False, map_dbvr_error(blob, db["label"], db["env"])
+    if result == "missing":
+        return False, map_dbvr_error(blob, db["label"], db["env"])
+    return True, result
 
 
 def print_paths(paths=None):
@@ -1158,7 +1168,7 @@ def setup(setup_doc, override, paths, only_env=None):
     failures = []
     for db in scope_rows:
         username, password = collected[db["key"]]
-        ok, detail = sign_in_check(dbvr, workspace, db, username, password)
+        ok, detail = check_login_roles(dbvr, workspace, db, username, password)
         print(f"{'OK' if ok else 'FAILED'} {db['database']}: {detail}", flush=True)
         if not ok:
             failures.append(db["database"])

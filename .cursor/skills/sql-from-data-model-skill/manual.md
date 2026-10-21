@@ -1,6 +1,6 @@
 # Option B — manual
 
-This is Option B of `/sql-from-data-model`. `SKILL.md` sends the user here when they pick B. Paths in this file are relative to the skill folder.
+This is Option B of `/sql-from-data-model-skill`. `SKILL.md` sends the user here when they pick B. Paths in this file are relative to the skill folder.
 
 The user gives a **scenario** (who or what they need to find or verify). You write **read-only SQL** they can paste into DBeaver. You do not run SQL against the database.
 
@@ -27,6 +27,8 @@ The model can be any file in the shape `catalog/build.md` writes: one section pe
 Try `python3`, then `py -3`, then `python`.
 
 A file may contain more than one database. Use only the section whose Identity `database_name` matches the database in the script.
+
+If that section's Identity block says the login cannot view definitions, a check rule, or a default that exists but is hidden, reads `not visible to this login`. Do not guess it. Say the model does not show that rule or default. A blank Default cell means the column has no default.
 
 Column notes are optional. `notes_path` in `setup.json` starts empty and is not required. When it is non-empty and that file exists, you may use it for column meanings, status values, and join rules the user wrote for that database. [notes.template.md](notes.template.md) is only a blank template. Do not treat it as the user's notes.
 
@@ -60,7 +62,7 @@ Default template (every script):
 SET NOCOUNT ON;
 SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
 
-DECLARE @Id NVARCHAR(50) = N'…'; /* only if needed; match the column type in the model */
+DECLARE @Id NVARCHAR(50) = N'…'; /* only if needed; match the column type in the model; write an apostrophe twice: N'O''Brien' */
 
 SELECT …
 FROM schema.TableName
@@ -73,7 +75,7 @@ Rules:
 - Bracket reserved names (`dbo.[Order]`).
 - Declare variables with a type taken from that column's `type_display`. Use `NVARCHAR` for national string types and `VARCHAR` for the others.
 - Filter with `DECLARE` when the user gave an id. Do not hardcode a value they will reuse. A literal in the query looks like `WHERE CustomerId = N'C-1001'`.
-- If a value contains an apostrophe, write it twice, in a `DECLARE` value or a literal, for example `N'O''Brien'`.
+- If a value contains an apostrophe, write it twice, for example `N'O''Brien'`. This applies to `DECLARE` values and to any value written in the query.
 - Filter out stale rows only when that column is in this table's column list (`DeletedAt`, `RemovedAt`, `ValidTo`, or a status column the model actually has). Do not add those filters because another database has them.
 - Split: (1) confirm the entity exists, (2) the lookup, (3) a fallback only if (2) can be empty and the model has another table that could answer it.
 - Label each script with a one-line comment of what it answers and which database.

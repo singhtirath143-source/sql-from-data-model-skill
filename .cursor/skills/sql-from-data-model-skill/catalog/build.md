@@ -1,6 +1,6 @@
 # Build the data model by hand
 
-This file is part of `/sql-from-data-model`. It is used two ways:
+This file is part of `/sql-from-data-model-skill`. It is used two ways:
 
 - **Option B, by hand.** The user has no data model yet. Follow this whole file.
 - **Option A, through dbvr.** `SKILL.md` runs the same scripts itself. It follows only `## Gates`, `## After each passing result`, and `## Write the data model` below.
@@ -56,9 +56,9 @@ Stay on the current step when a gate fails. Say what is wrong and paste that sam
 
 | Step | Pass | Stay and repeat |
 |---|---|---|
-| 1 Identity | One row, and `database_name` is the database they meant | Empty, error, or `master` / any other database. Tell them to select the database in the connection and rerun. |
-| 2 Tables | Header includes `schema_name`, `table_name`, `row_count` | Error, missing header, or a partial export. A header with **zero table rows** is a pass: the database has no user tables. |
-| 3 Columns | Header includes `table_name`, `column_name`, `type_display`, `is_nullable`, and every table from Step 2 appears at least once | A table from Step 2 is missing, or they said the export was truncated. Ask for the full grid. |
+| 1 Identity | One row, `database_name` is the database they meant, and the header includes `can_view_definitions` | Empty, error, or `master` / any other database. Tell them to select the database in the connection and rerun. A missing `can_view_definitions` means an older copy of the script: resend Step 1. |
+| 2 Tables | Header includes `schema_name`, `table_name`, `row_count`, `column_count` | Error, missing header, or a partial export. A header with **zero table rows** is a pass: the database has no user tables. |
+| 3 Columns | Header includes `table_name`, `column_name`, `type_display`, `is_nullable`, `has_default`, and every table from Step 2 has exactly its `column_count` rows here | A table's row count here differs from its Step 2 `column_count`, or they said the export was truncated. Stay on Step 3 and name each table that is short, with both counts. By hand this usually means a truncated export: ask for the full grid. Through dbvr it means a bug: stop and report it, and do not write the data model. |
 | 4 Indexes | Header includes `table_name`, `index_name`, `is_primary_key`, `column_name` | Error or missing header. A table that appears in Step 2 and not here is a pass: it has no key and no indexes. Say so. |
 | 5 Foreign keys | Header includes `parent_table`, `parent_column`, `referenced_table`, `referenced_column` | Error or missing header. Zero rows is a pass: no foreign keys. |
 | 6 Check constraints | Header includes `table_name`, `constraint_name`, `definition` | Error or missing header. Zero rows is a pass: no check constraints. |
@@ -73,6 +73,7 @@ After a passing Step 7, write the data model. Do not add a profiling query.
 Two to four sentences, then the next step:
 
 - Which database the grid belongs to
+- After Step 1, whether this login can view definitions (`can_view_definitions`)
 - The count that matters (tables, columns, keys, foreign keys, other objects)
 - Anything the next step needs (for example, which tables have no indexes)
 
@@ -83,6 +84,16 @@ Two to four sentences, then the next step:
 Write one section per database. Use the template below. Omit a section only when that step was skipped because Step 2 returned no tables; say it was skipped.
 
 Group columns, indexes, and foreign keys under each table, in Step 2 order. Under each table state the primary key, unique constraints (including `filter_definition` when `has_filter` is 1), foreign keys, and check constraints. A table with no Step 4 rows is "no primary key and no indexes." A table with no Step 5 rows is "no foreign keys."
+
+When Step 1's `can_view_definitions` is 0:
+
+- Add this line under the Identity block, exactly: "This login cannot view definitions, so check-constraint rules, column defaults and some procedures and functions are not shown. Ask the DBA for VIEW DEFINITION (read-only) for a complete model."
+- A column with `has_default` = 1 and an empty `default_definition` has a hidden default: write `not visible to this login`.
+- A column with `has_default` = 0 has no default: leave the Default cell blank.
+- A check constraint with an empty `definition` is hidden: write `not visible to this login`.
+- Never fill a definition or default in from memory, an older data model, or general knowledge.
+
+The Detail of a view, procedure, or function in Step 7 is empty by design. Leave it blank. Do not write `not visible to this login` there.
 
 ```markdown
 ---
@@ -95,7 +106,8 @@ note: Structural catalog from read-only sys.* scripts. Row counts are catalog es
 # [database_name] — Data Model
 
 ## Identity
-[generated_utc, server_name, collation_name, compatibility_level]
+[generated_utc, server_name, collation_name, compatibility_level, can_view_definitions]
+[only when can_view_definitions is 0: the hidden-definitions line above]
 
 ## Table inventory ([N] tables)
 

@@ -16,7 +16,8 @@ SELECT
   DB_NAME() AS database_name,
   @@SERVERNAME AS server_name,
   CAST(DATABASEPROPERTYEX(DB_NAME(), 'Collation') AS nvarchar(128)) AS collation_name,
-  d.compatibility_level
+  d.compatibility_level,
+  HAS_PERMS_BY_NAME(DB_NAME(), 'DATABASE', 'VIEW DEFINITION') AS can_view_definitions
 FROM sys.databases AS d
 WHERE d.name = DB_NAME();
 ```
@@ -32,6 +33,7 @@ SELECT
   s.name AS schema_name,
   t.name AS table_name,
   ISNULL(p.row_count, 0) AS row_count,
+  (SELECT COUNT(*) FROM sys.columns AS c WHERE c.object_id = t.object_id) AS column_count,
   t.create_date,
   t.modify_date,
   t.temporal_type_desc
@@ -60,26 +62,28 @@ SELECT
   t.name AS table_name,
   c.column_id,
   c.name AS column_name,
-  ty.name AS type_name,
+  COALESCE(ty.name, bt.name, N'unknown') AS type_name,
   CASE
-    WHEN ty.name IN (N'varchar', N'char', N'binary', N'varbinary')
-      THEN ty.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CONVERT(nvarchar(10), c.max_length) END + N')'
-    WHEN ty.name IN (N'nvarchar', N'nchar')
-      THEN ty.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CONVERT(nvarchar(10), c.max_length / 2) END + N')'
-    WHEN ty.name IN (N'decimal', N'numeric')
-      THEN ty.name + N'(' + CONVERT(nvarchar(10), c.precision) + N',' + CONVERT(nvarchar(10), c.scale) + N')'
-    WHEN ty.name IN (N'datetime2', N'datetimeoffset', N'time')
-      THEN ty.name + N'(' + CONVERT(nvarchar(10), c.scale) + N')'
-    ELSE ty.name
+    WHEN bt.name IN (N'varchar', N'char', N'binary', N'varbinary')
+      THEN bt.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CONVERT(nvarchar(10), c.max_length) END + N')'
+    WHEN bt.name IN (N'nvarchar', N'nchar')
+      THEN bt.name + N'(' + CASE WHEN c.max_length = -1 THEN N'max' ELSE CONVERT(nvarchar(10), c.max_length / 2) END + N')'
+    WHEN bt.name IN (N'decimal', N'numeric')
+      THEN bt.name + N'(' + CONVERT(nvarchar(10), c.precision) + N',' + CONVERT(nvarchar(10), c.scale) + N')'
+    WHEN bt.name IN (N'datetime2', N'datetimeoffset', N'time')
+      THEN bt.name + N'(' + CONVERT(nvarchar(10), c.scale) + N')'
+    ELSE COALESCE(bt.name, ty.name, N'unknown')
   END AS type_display,
   CASE WHEN c.is_nullable = 1 THEN N'YES' ELSE N'NO' END AS is_nullable,
   c.is_identity,
   c.is_computed,
+  CASE WHEN dc.object_id IS NULL THEN 0 ELSE 1 END AS has_default,
   LEFT(dc.definition, 400) AS default_definition
 FROM sys.tables AS t
 INNER JOIN sys.schemas AS s ON s.schema_id = t.schema_id
 INNER JOIN sys.columns AS c ON c.object_id = t.object_id
-INNER JOIN sys.types AS ty ON ty.user_type_id = c.user_type_id
+LEFT JOIN sys.types AS ty ON ty.user_type_id = c.user_type_id
+LEFT JOIN sys.types AS bt ON bt.user_type_id = c.system_type_id
 LEFT JOIN sys.default_constraints AS dc
   ON dc.parent_object_id = c.object_id
  AND dc.parent_column_id = c.column_id

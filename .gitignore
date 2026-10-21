@@ -12,6 +12,8 @@ databases.json
 notes.md
 !.cursor/skills/**/*data-model*.md
 !.cursor/skills/**/notes.template.md
+*.saved-queries.md
+!examples/*.md
 
 # Python bytecode from running the tests.
 __pycache__/
